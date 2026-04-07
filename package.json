@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@sanity/client": "^7.20.0"
+  }
+}
