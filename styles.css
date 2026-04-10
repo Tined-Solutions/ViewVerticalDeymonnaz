@@ -785,6 +785,8 @@ body {
   --tv-price-mid: #dbe8ff;
   --tv-price-bottom: #a8c0ea;
   --tv-price-accent-rgb: var(--accent-1-rgb);
+  --tv-price-mid-rgb: var(--accent-2-rgb);
+  --tv-price-bottom-rgb: var(--accent-3-rgb);
   --tv-price-accent-alpha: 0.24;
   --tv-price-border-alpha: 0.28;
   font-family: "IBM Plex Sans", "Sora", sans-serif;
@@ -795,9 +797,10 @@ body {
   line-height: 1;
   padding: 0.17em 0.42em 0.22em;
   border-radius: 0.42em;
-  border: 2px solid rgba(var(--tv-price-accent-rgb), calc(var(--tv-price-border-alpha) + 0.08));
+  border: 2px solid rgba(var(--tv-price-mid-rgb), calc(var(--tv-price-border-alpha) + 0.08));
   background:
-    linear-gradient(132deg, rgba(var(--tv-price-accent-rgb), calc(var(--tv-price-accent-alpha) * 1.08)) 0%, rgba(20, 38, 72, 0.96) 46%, rgba(8, 16, 33, 0.98) 100%),
+    linear-gradient(132deg, rgba(var(--tv-price-accent-rgb), calc(var(--tv-price-accent-alpha) * 1.08)) 0%, rgba(var(--tv-price-mid-rgb), calc(var(--tv-price-accent-alpha) * 1.02)) 46%, rgba(var(--tv-price-bottom-rgb), calc(var(--tv-price-accent-alpha) * 0.92)) 100%),
+    linear-gradient(154deg, rgba(4, 8, 16, 0.9) 0%, rgba(3, 7, 15, 0.97) 100%),
     radial-gradient(circle at 92% 10%, rgba(255, 255, 255, 0.14) 0%, transparent 48%);
   color: var(--tv-price-top) !important;
   text-shadow:
