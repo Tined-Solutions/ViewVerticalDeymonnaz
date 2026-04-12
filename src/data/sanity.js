@@ -1390,6 +1390,142 @@
     };
   }
 
+  function resolveAllowedPublicationTargets(config) {
+    const defaults = ["vertical", "ambos"];
+    const configuredTargets = toArray(config.verticalPublicationTargets ?? config.allowedPublicationTargets ?? config.allowedPublishTargets);
+    const normalizedTargets = configuredTargets.map((value) => normalizeFieldToken(value)).filter(Boolean);
+    const targets = normalizedTargets.length > 0 ? normalizedTargets : defaults;
+    return new Set(targets);
+  }
+
+  function appendPublicationTargets(value, targets, visited = new Set()) {
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => appendPublicationTargets(entry, targets, visited));
+      return;
+    }
+
+    if (typeof value === "object") {
+      if (visited.has(value)) {
+        return;
+      }
+
+      visited.add(value);
+
+      const nestedKeys = [
+        "value",
+        "label",
+        "title",
+        "name",
+        "slug.current",
+        "slug",
+        "channel",
+        "canal",
+        "target",
+        "targets",
+        "publicarEn",
+        "publicar_en",
+        "publicadoEn",
+        "publishOn",
+        "publicationChannel",
+        "platform",
+        "plataforma",
+      ];
+
+      let consumedNested = false;
+
+      nestedKeys.forEach((key) => {
+        const nestedValue = readField(value, key);
+
+        if (nestedValue === undefined || nestedValue === null) {
+          return;
+        }
+
+        consumedNested = true;
+        appendPublicationTargets(nestedValue, targets, visited);
+      });
+
+      if (!consumedNested) {
+        Object.values(value).forEach((nestedValue) => appendPublicationTargets(nestedValue, targets, visited));
+      }
+
+      return;
+    }
+
+    const rawText = toText(value);
+
+    if (!rawText) {
+      return;
+    }
+
+    rawText
+      .split(/[;,|/]+/)
+      .map((entry) => normalizeFieldToken(entry))
+      .filter(Boolean)
+      .forEach((token) => {
+        if (token.includes("vertical")) {
+          targets.push("vertical");
+          return;
+        }
+
+        if (token.includes("amb") || token.includes("both")) {
+          targets.push("ambos");
+          return;
+        }
+
+        targets.push(token);
+      });
+  }
+
+  function extractPublicationTargets(doc) {
+    const rawPublicationTarget = pickField(
+      doc,
+      [
+        "publicarEn",
+        "publicar_en",
+        "publicadoEn",
+        "publicationChannel",
+        "publishOn",
+        "publish_channel",
+        "canalPublicacion",
+        "canal_publicacion",
+        "canalDifusion",
+        "difusion.publicarEn",
+        "difusion.publicar_en",
+        "difusion.publicadoEn",
+        "difusion.publishOn",
+        "difusion.publicationChannel",
+        "Difusion.publicarEn",
+        "Difusion.publicar_en",
+        "Difusion.publicadoEn",
+      ],
+      null
+    );
+
+    if (rawPublicationTarget === undefined || rawPublicationTarget === null) {
+      return [];
+    }
+
+    const tokens = [];
+    appendPublicationTargets(rawPublicationTarget, tokens);
+
+    return Array.from(new Set(tokens));
+  }
+
+  function isPropertyVisibleInVertical(doc, config) {
+    const allowedTargets = resolveAllowedPublicationTargets(config);
+    const propertyTargets = extractPublicationTargets(doc);
+
+    if (propertyTargets.length === 0) {
+      return false;
+    }
+
+    return propertyTargets.some((target) => allowedTargets.has(target));
+  }
+
   function normalizeProperty(doc, config) {
     if (!doc || typeof doc !== "object" || !isRecordActive(doc)) {
       return null;
@@ -1398,6 +1534,10 @@
     const name = toText(doc.titulo ?? doc.name ?? doc.title);
 
     if (!name) {
+      return null;
+    }
+
+    if (!isPropertyVisibleInVertical(doc, config)) {
       return null;
     }
 
