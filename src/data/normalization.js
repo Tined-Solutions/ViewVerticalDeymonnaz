@@ -1,4 +1,4 @@
-import { parseNumber, parsePrice, readField, pickField, parseDuration, slugify } from './mappers.js';
+import { parseNumber, parsePrice, readField, pickField, parseDuration, slugify, parseNullableNumber } from './mappers.js';
 import { normalizeMedia } from './media.js';
 import { buildServiceFeaturesFromFlags, buildPanelMetrics } from './metrics.js';
 import { normalizeTheme, resolveVisualTheme } from './theme.js';
@@ -129,6 +129,50 @@ function isPublishedForVertical(doc) {
     return targets.some((target) => isVerticalPublicationTarget(target));
   }
 
+function resolveSurfaceModel(doc) {
+    const superficieLegacy = parseNullableNumber(pickField(doc, ["Superficie", "superficie", "m2", "metros", "area", "metrosCuadrados", "mts2"], null));
+    const superficieTerreno = parseNullableNumber(
+      pickField(
+        doc,
+        [
+          "SuperficieTerreno",
+          "superficieTerreno",
+          "superficie_terreno",
+          "surfaceLand",
+          "landArea",
+          "superficieTotal",
+          "SuperficieTotal",
+          "totalArea",
+          "m2Totales",
+          "metrosTotales",
+        ],
+        null
+      )
+    );
+    const superficieEdificada = parseNullableNumber(
+      pickField(
+        doc,
+        [
+          "SuperficieEdificada",
+          "superficieEdificada",
+          "superficie_edificada",
+          "superficieCubierta",
+          "SuperficieCubierta",
+          "coveredArea",
+          "m2Cubiertos",
+          "metrosCubiertos",
+        ],
+        null
+      )
+    );
+
+    return {
+      superficieTerreno: superficieTerreno ?? superficieLegacy ?? null,
+      superficieEdificada: superficieEdificada ?? null,
+      superficieLegacy,
+    };
+  }
+
 export function normalizeProperty(doc, config) {
     if (!doc || typeof doc !== "object") {
       return null;
@@ -177,7 +221,8 @@ export function normalizeProperty(doc, config) {
       ])
     );
 
-    const metrics = buildPanelMetrics(doc);
+    const surfaceModel = resolveSurfaceModel(doc);
+    const metrics = buildPanelMetrics(doc, surfaceModel);
 
     const property = {
       id: toText(doc.id ?? doc.slug?.current ?? doc.slug ?? doc._id ?? slugify(name)) || slugify(name),
@@ -191,6 +236,12 @@ export function normalizeProperty(doc, config) {
       badge: toText(doc.badge) || operationLabel,
       summary: buildPropertySummary(doc, type, location, operationLabel),
       publishedUrl,
+      superficieTerreno: surfaceModel.superficieTerreno,
+      superficieEdificada: surfaceModel.superficieEdificada,
+      superficieLegacy: surfaceModel.superficieLegacy,
+      SuperficieTerreno: surfaceModel.superficieTerreno,
+      SuperficieEdificada: surfaceModel.superficieEdificada,
+      SuperficieLegacy: surfaceModel.superficieLegacy,
       metrics,
       features: normalizeFeatures([
         ...toArray(

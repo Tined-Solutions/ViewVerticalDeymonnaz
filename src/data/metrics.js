@@ -1,4 +1,4 @@
-import { toBooleanFlag, readField, pickField, formatArea } from './mappers.js';
+import { toBooleanFlag, readField, pickField, formatArea, parseNullableNumber } from './mappers.js';
 import { toText, normalizeFieldToken, hasValue, toArray, normalizeCountMetricValue, hasAmenityFromDoc } from './utils.js';
 
 export function metricLabelFromKey(key) {
@@ -12,16 +12,21 @@ export function metricLabelFromKey(key) {
       cochera: "Cochera",
       garage: "Cochera",
       garages: "Cocheras",
-      superficie: "Superficie",
-      superficietotal: "Sup. total",
-      superficiecubierta: "Sup. cubierta",
-      totalarea: "Sup. total",
-      coveredarea: "Sup. cubierta",
-      m2: "Superficie",
-      m2totales: "Sup. total",
-      m2cubiertos: "Sup. cubierta",
-      metros: "Superficie",
-      metroscuadrados: "Superficie",
+      superficieterreno: "Superficie terreno",
+      superficieedificada: "Superficie edificada",
+      superficielegacy: "Superficie terreno",
+      superficie: "Superficie terreno",
+      superficietotal: "Superficie terreno",
+      superficiecubierta: "Superficie edificada",
+      totalarea: "Superficie terreno",
+      coveredarea: "Superficie edificada",
+      m2: "Superficie terreno",
+      m2totales: "Superficie terreno",
+      m2cubiertos: "Superficie edificada",
+      metros: "Superficie terreno",
+      metroscuadrados: "Superficie terreno",
+      metrostotales: "Superficie terreno",
+      metroscubiertos: "Superficie edificada",
       expensas: "Expensas",
     };
 
@@ -99,28 +104,16 @@ export function metricPriority(label) {
       return 2;
     }
 
-    if (
-      [
-        "superficie",
-        "superficietotal",
-        "superficiecubierta",
-        "suptotal",
-        "supcubierta",
-        "m2",
-        "m2totales",
-        "m2cubiertos",
-        "metros",
-        "metroscuadrados",
-        "totalarea",
-        "coveredarea",
-        "area",
-      ].includes(normalized)
-    ) {
+    if (["superficieterreno", "superficie", "superficietotal", "suptotal", "m2", "m2totales", "metros", "metroscuadrados", "metrostotales", "totalarea", "area"].includes(normalized)) {
       return 3;
     }
 
-    if (["cochera", "cocheras", "garage", "garages", "garagecount", "parking"].includes(normalized)) {
+    if (["superficieedificada", "superficiecubierta", "supcubierta", "m2cubiertos", "metroscubiertos", "coveredarea"].includes(normalized)) {
       return 4;
+    }
+
+    if (["cochera", "cocheras", "garage", "garages", "garagecount", "parking"].includes(normalized)) {
+      return 5;
     }
 
     return 99;
@@ -157,14 +150,58 @@ export function buildServiceFeaturesFromFlags(doc) {
     return services;
   }
 
-export function buildPanelMetrics(doc) {
+function resolveSurfaceMetricsModel(doc) {
+    const superficieLegacy = parseNullableNumber(pickField(doc, ["Superficie", "superficie", "m2", "metros", "area", "metrosCuadrados", "mts2"], null));
+    const superficieTerreno = parseNullableNumber(
+      pickField(
+        doc,
+        [
+          "SuperficieTerreno",
+          "superficieTerreno",
+          "superficie_terreno",
+          "surfaceLand",
+          "landArea",
+          "superficieTotal",
+          "SuperficieTotal",
+          "totalArea",
+          "m2Totales",
+          "metrosTotales",
+        ],
+        null
+      )
+    );
+    const superficieEdificada = parseNullableNumber(
+      pickField(
+        doc,
+        [
+          "SuperficieEdificada",
+          "superficieEdificada",
+          "superficie_edificada",
+          "superficieCubierta",
+          "SuperficieCubierta",
+          "coveredArea",
+          "m2Cubiertos",
+          "metrosCubiertos",
+        ],
+        null
+      )
+    );
+
+    return {
+      superficieTerreno: superficieTerreno ?? superficieLegacy ?? null,
+      superficieEdificada: superficieEdificada ?? null,
+      superficieLegacy,
+    };
+  }
+
+export function buildPanelMetrics(doc, surfaceModel) {
     const metrics = [];
     const cochera = pickField(doc, ["Cochera", "cochera", "garage", "garages", "garageCount", "cocheras"]);
     const banos = pickField(doc, ["Banos", "banos", "Baños", "baños", "bathrooms", "bathroomCount", "cantidadBanos"]);
     const habitaciones = pickField(doc, ["Habitaciones", "habitaciones", "Dormitorios", "dormitorios", "bedrooms", "bedroomCount", "cantidadDormitorios"]);
-    const superficie =
-      formatArea(pickField(doc, ["Superficie", "superficie", "superficieTotal", "SuperficieTotal", "totalArea", "m2Totales", "metrosTotales"])) ||
-      formatArea(pickField(doc, ["superficieCubierta", "SuperficieCubierta", "coveredArea", "m2Cubiertos", "metrosCubiertos"]));
+    const normalizedSurfaceModel = surfaceModel && typeof surfaceModel === "object" ? surfaceModel : resolveSurfaceMetricsModel(doc);
+    const superficieTerreno = formatArea(normalizedSurfaceModel.superficieTerreno);
+    const superficieEdificada = formatArea(normalizedSurfaceModel.superficieEdificada);
     const piscina = hasAmenityFromDoc(doc, ["Piscina", "piscina", "pileta", "pool"], /piscina|pileta|pool/);
     const patio = hasAmenityFromDoc(doc, ["Patio", "patio"], /patio/);
 
@@ -180,8 +217,12 @@ export function buildPanelMetrics(doc) {
       metrics.push({ label: "Habitaciones", value: normalizeCountMetricValue(habitaciones) });
     }
 
-    if (hasValue(superficie)) {
-      metrics.push({ label: "Superficie", value: superficie });
+    if (hasValue(superficieTerreno)) {
+      metrics.push({ label: "Superficie terreno", value: superficieTerreno });
+    }
+
+    if (hasValue(superficieEdificada)) {
+      metrics.push({ label: "Superficie edificada", value: superficieEdificada });
     }
 
     if (piscina) {

@@ -6,6 +6,20 @@ export function parseNumber(value) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+export function parseNullableNumber(value) {
+    if (!hasValue(value)) {
+      return null;
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    const cleaned = toText(value).replace(/[^0-9.,-]/g, "").replace(",", ".");
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
 export function clampNumber(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
