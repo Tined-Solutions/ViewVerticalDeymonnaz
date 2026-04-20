@@ -7,7 +7,7 @@ window.InmoSanityConfig = {
 	liveRefreshIntervalMs: 300000,
 	listenDebounceMs: 5000,
 	listenVisibility: "transaction",
-	defaultDurationMs: 20000,
+	defaultDurationMs: 30000,
 	panelRevealDelayMs: 1000,
 	tvPerformanceMode: true,
 	panelDynamicBlur: true,
