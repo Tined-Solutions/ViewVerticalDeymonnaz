@@ -34,7 +34,9 @@ export function CatalogExperience({ catalog, utils, siteBaseUrl, defaultDuration
   const activeTheme = visualTheme || (property && property.theme) || null;
   const mediaPerspective = performanceMode ? "1650px" : "1450px";
   const qrUrl = property ? buildQrUrl(property, siteBaseUrl) : "";
-  const panelVisible = Boolean(property) && panelDelayDone && (reduceMotion || performanceMode || qrReady);
+  const isSinZocaloMedia = Boolean(media && media.zocaloVariant === "sin");
+  const shouldShowZocaloPanel = Boolean(property && property.isConZocalo !== false && !isSinZocaloMedia);
+  const panelVisible = shouldShowZocaloPanel && panelDelayDone && (reduceMotion || performanceMode || qrReady);
 
   React.useEffect(() => {
     setMediaDurationMs(resolveMediaDurationMs(media, defaultDurationMs));
@@ -122,6 +124,13 @@ export function CatalogExperience({ catalog, utils, siteBaseUrl, defaultDuration
   React.useEffect(() => {
     let active = true;
 
+    if (!shouldShowZocaloPanel) {
+      setQrReady(true);
+      return () => {
+        active = false;
+      };
+    }
+
     if (!property || !qrUrl) {
       setQrReady(false);
       return () => {
@@ -155,7 +164,7 @@ export function CatalogExperience({ catalog, utils, siteBaseUrl, defaultDuration
     return () => {
       active = false;
     };
-  }, [property, propertyIndex, qrUrl]);
+  }, [property, propertyIndex, qrUrl, shouldShowZocaloPanel]);
 
   React.useEffect(() => {
     const selectedTheme = visualTheme || (property && property.theme) || null;
@@ -277,8 +286,8 @@ export function CatalogExperience({ catalog, utils, siteBaseUrl, defaultDuration
         "div",
         { className: "media-stage-shell" },
         create("div", { className: "media-stage", style: reduceMotion ? undefined : { perspective: mediaPerspective } }, create(MediaStage, { property, media, reduceMotion, performanceMode, onMediaDurationChange: handleMediaDurationChange })),
-        create("div", { className: "media-stage__overlay" }),
-        performanceMode ? null : create("div", { className: "media-stage__glow" })
+        shouldShowZocaloPanel ? create("div", { className: "media-stage__overlay" }) : null,
+        performanceMode || !shouldShowZocaloPanel ? null : create("div", { className: "media-stage__glow" })
       ),
       panelVisible ? create(PropertyPanel, { property, siteBaseUrl, qrUrl, utils, reduceMotion, performanceMode, panelVisual, activeTheme }) : null
     )
