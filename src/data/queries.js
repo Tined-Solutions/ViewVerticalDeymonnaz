@@ -131,6 +131,8 @@ export function buildPropertiesQuery() {
       durationMs,
       duration_ms,
       slideDurationMs,
+      publicacionConZocalo,
+      mantenerZocaloEnVideo,
       sortOrder,
       sort_order,
       order,
@@ -144,6 +146,13 @@ export function buildPropertiesQuery() {
         "duration": coalesce(duration, durationMs, duration_ms)
       },
       fotos[]{
+        ...,
+        "src": asset->url,
+        "poster": asset->url,
+        "caption": coalesce(caption, alt, title, name),
+        "duration": coalesce(duration, durationMs, duration_ms)
+      },
+      fotosSinZocalo[]{
         ...,
         "src": asset->url,
         "poster": asset->url,

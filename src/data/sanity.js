@@ -1029,6 +1029,10 @@
       "canalpublicacion",
       "publicationchannel",
       "publicationtarget",
+      "publicacionconzocalo",
+      "conzocalo",
+      "mantenerzocaloenvideo",
+      "videoconzocalo",
       "publicacionurl",
       "landingurl",
       "qrlink",
@@ -1585,6 +1589,28 @@
     return items;
   }
 
+  function resolvePublicacionConZocalo(value) {
+    if (!hasValue(value)) {
+      return true;
+    }
+
+    return toBooleanFlag(value);
+  }
+
+  function resolveMantenerZocaloEnVideo(value, isConZocalo) {
+    if (hasValue(value)) {
+      return toBooleanFlag(value);
+    }
+
+    return Boolean(isConZocalo);
+  }
+
+  function asImageGallery(items) {
+    return toArray(items)
+      .filter((item) => item && item.type === "image" && item.src)
+      .map((item) => ({ ...item }));
+  }
+
   function normalizeCompany(settings, config) {
     const source = settings && typeof settings === "object" ? settings : {};
 
@@ -1761,13 +1787,52 @@
 
     const fallbackDurationMs = Number(config.defaultDurationMs) || 20000;
     const totalDurationMs = parseDuration(pickField(doc, ["durationMs", "duration_ms", "slideDurationMs", "slideDuration", "duration"]), fallbackDurationMs);
-    const media = normalizeMedia(
+    const isConZocalo = resolvePublicacionConZocalo(
+      pickField(doc, ["publicacionConZocalo", "publicacion_con_zocalo", "conZocalo", "con_zocalo"], undefined)
+    );
+    const galleryConZocalo = asImageGallery(
+      normalizeMedia(
+        [
+          pickField(doc, ["fotos", "Fotos"]),
+          pickField(doc, ["images", "Images"]),
+          pickField(doc, ["gallery", "Gallery"]),
+          pickField(doc, ["galeria", "Galeria"]),
+        ],
+        totalDurationMs,
+        config
+      )
+    );
+    const gallerySinZocalo = asImageGallery(
+      normalizeMedia([pickField(doc, ["fotosSinZocalo", "FotosSinZocalo", "fotos_sin_zocalo"])], totalDurationMs, config)
+    );
+    const gallerySinZocaloFallback = !isConZocalo && gallerySinZocalo.length === 0 && galleryConZocalo.length > 0
+      ? galleryConZocalo.map((item) => ({ ...item }))
+      : gallerySinZocalo.map((item) => ({ ...item }));
+    const totalGalleryImages = galleryConZocalo.length + gallerySinZocalo.length;
+    const safeGalleryImageCount = totalGalleryImages > 0 ? totalGalleryImages : gallerySinZocaloFallback.length;
+    const perImageDurationMs = safeGalleryImageCount > 0
+      ? Math.max(1000, Math.round(totalDurationMs / safeGalleryImageCount))
+      : totalDurationMs;
+    const galleryConZocaloWithDuration = galleryConZocalo.map((item) => ({
+      ...item,
+      duration: perImageDurationMs,
+      zocaloVariant: "con",
+    }));
+    const gallerySinZocaloWithDuration = gallerySinZocalo.map((item) => ({
+      ...item,
+      duration: perImageDurationMs,
+      zocaloVariant: "sin",
+    }));
+    const gallerySinZocaloFallbackWithDuration = gallerySinZocaloFallback.map((item) => ({
+      ...item,
+      duration: perImageDurationMs,
+      zocaloVariant: "sin",
+    }));
+    const normalizedGallerySinZocalo = gallerySinZocaloWithDuration.length > 0
+      ? gallerySinZocaloWithDuration
+      : (!isConZocalo ? gallerySinZocaloFallbackWithDuration : gallerySinZocaloWithDuration);
+    const videoMedia = normalizeMedia(
       [
-        pickField(doc, ["media", "Media"]),
-        pickField(doc, ["fotos", "Fotos"]),
-        pickField(doc, ["images", "Images"]),
-        pickField(doc, ["gallery", "Gallery"]),
-        pickField(doc, ["galeria", "Galeria"]),
         pickField(doc, ["videoMp4", "video_mp4", "videoFile", "video_file"]),
         pickField(doc, ["video", "Video"]),
         pickField(doc, ["videos", "Videos"]),
@@ -1776,7 +1841,35 @@
       ],
       totalDurationMs,
       config
+    ).filter((item) => item && item.type === "video" && item.src);
+    const explicitVideoUrl = safeUrl(pickField(doc, ["videoUrl", "video_url", "videoMp4.asset.url"]));
+    const firstVideoMedia = videoMedia.find((item) => item && item.type === "video" && item.src);
+    const resolvedVideoUrl = explicitVideoUrl || (firstVideoMedia ? safeUrl(firstVideoMedia.src) : "");
+    const mantenerZocaloEnVideo = resolveMantenerZocaloEnVideo(
+      pickField(doc, ["mantenerZocaloEnVideo", "mantener_zocalo_en_video", "videoConZocalo"], undefined),
+      isConZocalo
     );
+    const videoItem = resolvedVideoUrl
+      ? {
+          type: "video",
+          src: resolvedVideoUrl,
+          caption: toText(firstVideoMedia && firstVideoMedia.caption),
+          duration: Number.isFinite(firstVideoMedia && firstVideoMedia.duration) ? firstVideoMedia.duration : 0,
+          poster: toText(firstVideoMedia && firstVideoMedia.poster),
+          zocaloVariant: mantenerZocaloEnVideo ? "con" : "sin",
+        }
+      : null;
+    const principalGallery = isConZocalo
+      ? (() => {
+          const ordered = [...galleryConZocaloWithDuration, ...gallerySinZocaloWithDuration];
+          return ordered.length > 0 ? ordered : gallerySinZocaloFallbackWithDuration;
+        })()
+      : (normalizedGallerySinZocalo.length > 0 ? normalizedGallerySinZocalo : galleryConZocaloWithDuration);
+    const media = principalGallery.map((item) => ({ ...item }));
+
+    if (videoItem && !media.some((item) => item.type === "video" && item.src === videoItem.src)) {
+      media.unshift(videoItem);
+    }
 
     if (media.length === 0) {
       return null;
@@ -1815,10 +1908,14 @@
       slug: toText(doc.slug?.current ?? doc.slug ?? ""),
       name,
       title: toText(doc.title ?? doc.titulo ?? name),
+      isConZocalo,
+      mantenerZocaloEnVideo,
       type,
       location,
       price: parsePrice(pickField(doc, ["price", "precio", "valor", "importe", "amount"])),
       currency: toText(pickField(doc, ["moneda", "currency", "currencyCode", "currency_code"])),
+      galleryConZocalo: galleryConZocaloWithDuration,
+      gallerySinZocalo: normalizedGallerySinZocalo,
       badge: toText(doc.badge) || operationLabel,
       summary: buildPropertySummary(doc, type, location, operationLabel),
       publishedUrl,
@@ -2047,6 +2144,8 @@
       durationMs,
       duration_ms,
       slideDurationMs,
+      publicacionConZocalo,
+      mantenerZocaloEnVideo,
       sortOrder,
       sort_order,
       order,
@@ -2095,6 +2194,17 @@
         "type": coalesce(type, mediaType, kind, _type)
       },
       fotos[]{
+        ...,
+        "src": asset->url,
+        "playbackId": coalesce(asset->metadata.playbacks[policy == "public"][0]._id, video.asset->metadata.playbacks[policy == "public"][0]._id, file.asset->metadata.playbacks[policy == "public"][0]._id),
+        "durationSeconds": coalesce(asset->metadata.duration, asset->metadata.durationMs, video.asset->metadata.duration, file.asset->metadata.duration),
+        "poster": asset->url,
+        "caption": coalesce(caption, alt, title, name),
+        "duration": coalesce(duration, durationMs, duration_ms),
+        "mimeType": coalesce(mimeType, asset->mimeType, image.asset->mimeType, video.asset->mimeType, file.asset->mimeType),
+        "type": coalesce(type, mediaType, kind, _type)
+      },
+      fotosSinZocalo[]{
         ...,
         "src": asset->url,
         "playbackId": coalesce(asset->metadata.playbacks[policy == "public"][0]._id, video.asset->metadata.playbacks[policy == "public"][0]._id, file.asset->metadata.playbacks[policy == "public"][0]._id),
