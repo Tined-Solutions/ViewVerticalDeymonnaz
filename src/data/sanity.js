@@ -962,6 +962,43 @@
     return toText(value);
   }
 
+  function normalizePublicationLabel(value) {
+    if (!hasValue(value)) {
+      return "";
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((entry) => normalizePublicationLabel(entry)).filter(Boolean).join(" · ");
+    }
+
+    if (typeof value === "object") {
+      return normalizePublicationLabel(value.label ?? value.title ?? value.name ?? value.value ?? value.text ?? "");
+    }
+
+    const text = toText(value);
+
+    if (!text) {
+      return "";
+    }
+
+    const labels = {
+      horizontal: "Horizontal",
+      vertical: "Vertical Caffarati",
+      verticalcremolatti: "Vertical Cremolatti",
+      ambasverticales: "Ambas verticales",
+      horizontalambasverticales: "Horizontal + ambas verticales",
+      ambos: "Horizontal + vertical Caffarati",
+      horizontalverticalcremolatti: "Horizontal + vertical Cremolatti",
+    };
+
+    return text
+      .split(/[,;|]/)
+      .map((part) => toText(part))
+      .filter(Boolean)
+      .map((part) => labels[normalizeFieldToken(part)] ?? part)
+      .join(" · ");
+  }
+
   function isSimpleFieldValue(value) {
     if (value === null || value === undefined) {
       return false;
@@ -1026,6 +1063,7 @@
       "publicaren",
       "sitiopublicacion",
       "sitiodepublicacion",
+      "publicacion",
       "canalpublicacion",
       "publicationchannel",
       "publicationtarget",
