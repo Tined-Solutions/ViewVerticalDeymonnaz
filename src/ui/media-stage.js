@@ -1,10 +1,71 @@
 import { React, AnimatePresence, create, motion } from "../runtime/react-motion.js";
 import { clampNumber } from "../shared/math.js";
 
+const videoBlobCache = new Map();
+const videoBlobPending = new Map();
+
+function isCacheableVideoUrl(url) {
+  if (!url) {
+    return false;
+  }
+
+  return /\.mp4(?:$|\?)/i.test(url);
+}
+
+function canUseBlobCache() {
+  return typeof window !== "undefined" && typeof fetch === "function" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function";
+}
+
+async function getVideoUrl(sanityUrl) {
+  const sourceUrl = typeof sanityUrl === "string" ? sanityUrl : "";
+
+  if (!sourceUrl || !canUseBlobCache() || !isCacheableVideoUrl(sourceUrl)) {
+    return sourceUrl;
+  }
+
+  const cached = videoBlobCache.get(sourceUrl);
+
+  if (cached) {
+    return cached;
+  }
+
+  const pending = videoBlobPending.get(sourceUrl);
+
+  if (pending) {
+    return pending;
+  }
+
+  const task = fetch(sourceUrl)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error("Video fetch failed");
+      }
+
+      return response.blob();
+    })
+    .then((blob) => {
+      const localUrl = URL.createObjectURL(blob);
+      videoBlobCache.set(sourceUrl, localUrl);
+      return localUrl;
+    })
+    .catch(() => {
+      videoBlobCache.set(sourceUrl, sourceUrl);
+      return sourceUrl;
+    })
+    .finally(() => {
+      videoBlobPending.delete(sourceUrl);
+    });
+
+  videoBlobPending.set(sourceUrl, task);
+  return task;
+}
+
 export function MediaStage({ property, media, reduceMotion, performanceMode, onMediaDurationChange }) {
   const isVideo = Boolean(media && media.type === "video");
   const mediaSrc = media && media.src ? media.src : "";
   const videoRef = React.useRef(null);
+  const [resolvedVideoSrc, setResolvedVideoSrc] = React.useState("");
+  const [videoLoading, setVideoLoading] = React.useState(false);
   const mediaDurationMs = Number.isFinite(media && media.duration) && media.duration > 0 ? media.duration : 20000;
   const holdDurationSeconds = clampNumber(mediaDurationMs / 1000, 8, 26);
   const enterDuration = performanceMode ? 0.66 : 0.86;
@@ -14,6 +75,49 @@ export function MediaStage({ property, media, reduceMotion, performanceMode, onM
     isHlsSource && typeof document !== "undefined" && document.createElement("video").canPlayType("application/vnd.apple.mpegurl")
   );
   const shouldAttachHls = Boolean(isHlsSource && !canPlayNativeHls && typeof window !== "undefined" && window.Hls && typeof window.Hls.isSupported === "function" && window.Hls.isSupported());
+  const shouldUseBlobCache = Boolean(isVideo && !isHlsSource && isCacheableVideoUrl(mediaSrc));
+  const propertyName = property ? property.name : "";
+  const mediaLabel = media && media.caption ? `${propertyName} - ${media.caption}` : propertyName;
+  const videoPoster = media && media.poster ? media.poster : "";
+  const effectiveVideoSrc = shouldUseBlobCache ? resolvedVideoSrc : mediaSrc;
+
+  React.useEffect(() => {
+    let active = true;
+
+    if (!shouldUseBlobCache || !mediaSrc) {
+      setResolvedVideoSrc("");
+      setVideoLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const cached = videoBlobCache.get(mediaSrc);
+
+    if (cached) {
+      setResolvedVideoSrc(cached);
+      setVideoLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setResolvedVideoSrc("");
+    setVideoLoading(true);
+
+    getVideoUrl(mediaSrc).then((url) => {
+      if (!active) {
+        return;
+      }
+
+      setResolvedVideoSrc(url || "");
+      setVideoLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [mediaSrc, shouldUseBlobCache]);
 
   React.useEffect(() => {
     if (!isVideo || !isHlsSource || !shouldAttachHls) {
@@ -45,8 +149,8 @@ export function MediaStage({ property, media, reduceMotion, performanceMode, onM
     };
   }, [isHlsSource, isVideo, mediaSrc, shouldAttachHls]);
 
-  if (performanceMode) {
-    if (!media) {
+  if (!media) {
+    if (performanceMode) {
       return create(
         "div",
         {
@@ -64,59 +168,105 @@ export function MediaStage({ property, media, reduceMotion, performanceMode, onM
     }
 
     return create(
+      motion.div,
+      {
+        className: "media-stage__item transform-gpu will-change-[transform,opacity]",
+        initial: reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.02 },
+        animate: reduceMotion
+          ? { opacity: 1 }
+          : { opacity: 1, scale: 1, transition: { type: "spring", stiffness: 90, damping: 18 } },
+      },
+      create(
+        "div",
+        {
+          className:
+            "flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(0,0,0,0.35))] p-8 text-center",
+        },
+        create("div", null, create("p", { className: "text-[10px] uppercase tracking-[0.4em] text-white/45" }, "Media no disponible"), create("p", { className: "mt-3 text-xl font-semibold text-white" }, property ? property.name : "Sin contenido"))
+      )
+    );
+  }
+
+  const videoStyle = performanceMode ? { backfaceVisibility: "hidden", willChange: "auto" } : reduceMotion ? undefined : { backfaceVisibility: "hidden", willChange: "auto" };
+  const imageStyle = performanceMode
+    ? { backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "auto" }
+    : reduceMotion
+    ? undefined
+    : { backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "auto" };
+  const shouldRenderVideo = Boolean(isVideo && (shouldAttachHls || effectiveVideoSrc));
+  const handleDurationChange = (event) => {
+    if (typeof onMediaDurationChange !== "function") {
+      return;
+    }
+
+    const durationSeconds = Number(event.currentTarget && event.currentTarget.duration);
+
+    if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+      onMediaDurationChange(Math.round(durationSeconds * 1000));
+    }
+  };
+  const videoElement = create("video", {
+    src: shouldAttachHls ? undefined : effectiveVideoSrc,
+    poster: videoPoster || "",
+    autoPlay: true,
+    muted: true,
+    loop: false,
+    playsInline: true,
+    preload: "metadata",
+    className: "transform-gpu",
+    "aria-label": mediaLabel,
+    ref: videoRef,
+    onLoadedMetadata: handleDurationChange,
+    onDurationChange: handleDurationChange,
+    style: videoStyle,
+  });
+  const imageElement = create("img", {
+    src: media.src,
+    alt: mediaLabel,
+    loading: "eager",
+    decoding: "async",
+    fetchPriority: "high",
+    className: "transform-gpu",
+    draggable: false,
+    referrerPolicy: "no-referrer",
+    style: imageStyle,
+  });
+  const videoFallback = videoPoster
+    ? create("img", {
+        src: videoPoster,
+        alt: mediaLabel,
+        loading: "eager",
+        decoding: "async",
+        fetchPriority: "high",
+        className: "transform-gpu",
+        draggable: false,
+        referrerPolicy: "no-referrer",
+        style: imageStyle,
+      })
+    : create(
+        "div",
+        {
+          className:
+            "flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(0,0,0,0.35))] p-8 text-center",
+        },
+        create(
+          "div",
+          null,
+          create("p", { className: "text-[10px] uppercase tracking-[0.4em] text-white/45" }, videoLoading ? "Cargando video..." : "Video no disponible"),
+          create("p", { className: "mt-3 text-xl font-semibold text-white" }, propertyName || "Sin contenido")
+        )
+      );
+  const mediaElement = isVideo ? (shouldRenderVideo ? videoElement : videoFallback) : imageElement;
+
+  if (performanceMode) {
+    return create(
       "div",
       {
         key: mediaSrc,
         className: "media-stage__item transform-gpu will-change-[transform,opacity]",
         style: { willChange: "auto" },
       },
-      media.type === "video"
-        ? create("video", {
-            src: shouldAttachHls ? undefined : mediaSrc,
-            poster: media.poster || "",
-            autoPlay: true,
-            muted: true,
-            loop: false,
-            playsInline: true,
-            preload: "metadata",
-            className: "transform-gpu",
-            "aria-label": media.caption ? `${property.name} - ${media.caption}` : property.name,
-            ref: videoRef,
-            onLoadedMetadata: (event) => {
-              if (typeof onMediaDurationChange !== "function") {
-                return;
-              }
-
-              const durationSeconds = Number(event.currentTarget && event.currentTarget.duration);
-
-              if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-                onMediaDurationChange(Math.round(durationSeconds * 1000));
-              }
-            },
-            onDurationChange: (event) => {
-              if (typeof onMediaDurationChange !== "function") {
-                return;
-              }
-
-              const durationSeconds = Number(event.currentTarget && event.currentTarget.duration);
-
-              if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-                onMediaDurationChange(Math.round(durationSeconds * 1000));
-              }
-            },
-            style: { backfaceVisibility: "hidden", willChange: "auto" },
-          })
-        : create("img", {
-            src: media.src,
-            alt: media.caption ? `${property.name} - ${media.caption}` : property.name,
-            loading: "eager",
-            decoding: "async",
-            fetchPriority: "high",
-            className: "transform-gpu",
-            draggable: false,
-            referrerPolicy: "no-referrer",
-            style: { backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "auto" },
-          })
+      mediaElement
     );
   }
 
@@ -172,27 +322,6 @@ export function MediaStage({ property, media, reduceMotion, performanceMode, onM
           },
         };
 
-  if (!media) {
-    return create(
-      motion.div,
-      {
-        className: "media-stage__item transform-gpu will-change-[transform,opacity]",
-        initial: reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.02 },
-        animate: reduceMotion
-          ? { opacity: 1 }
-          : { opacity: 1, scale: 1, transition: { type: "spring", stiffness: 90, damping: 18 } },
-      },
-      create(
-        "div",
-        {
-          className:
-            "flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(0,0,0,0.35))] p-8 text-center",
-        },
-        create("div", null, create("p", { className: "text-[10px] uppercase tracking-[0.4em] text-white/45" }, "Media no disponible"), create("p", { className: "mt-3 text-xl font-semibold text-white" }, property ? property.name : "Sin contenido"))
-      )
-    );
-  }
-
   return create(
     AnimatePresence,
     { mode: "sync", initial: false },
@@ -207,53 +336,7 @@ export function MediaStage({ property, media, reduceMotion, performanceMode, onM
         animate: "visible",
         exit: "exit",
       },
-      media.type === "video"
-        ? create("video", {
-            src: shouldAttachHls ? undefined : mediaSrc,
-            poster: media.poster || "",
-            autoPlay: true,
-            muted: true,
-            loop: false,
-            playsInline: true,
-            preload: "metadata",
-            className: "transform-gpu",
-            "aria-label": media.caption ? `${property.name} - ${media.caption}` : property.name,
-            ref: videoRef,
-            onLoadedMetadata: (event) => {
-              if (typeof onMediaDurationChange !== "function") {
-                return;
-              }
-
-              const durationSeconds = Number(event.currentTarget && event.currentTarget.duration);
-
-              if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-                onMediaDurationChange(Math.round(durationSeconds * 1000));
-              }
-            },
-            onDurationChange: (event) => {
-              if (typeof onMediaDurationChange !== "function") {
-                return;
-              }
-
-              const durationSeconds = Number(event.currentTarget && event.currentTarget.duration);
-
-              if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-                onMediaDurationChange(Math.round(durationSeconds * 1000));
-              }
-            },
-            style: reduceMotion ? undefined : { backfaceVisibility: "hidden", willChange: "auto" },
-          })
-        : create("img", {
-            src: media.src,
-            alt: media.caption ? `${property.name} - ${media.caption}` : property.name,
-            loading: "eager",
-            decoding: "async",
-            fetchPriority: "high",
-            className: "transform-gpu",
-            draggable: false,
-            referrerPolicy: "no-referrer",
-            style: reduceMotion ? undefined : { backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "auto" },
-          }),
+      mediaElement,
       !reduceMotion
         ? create(motion.span, {
             "aria-hidden": true,

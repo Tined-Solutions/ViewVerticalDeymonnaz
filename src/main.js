@@ -5,6 +5,50 @@ import { catalogSignature, isCatalogReady } from "./shared/catalog.js?v=20260411
 
 const rootElement = document.getElementById("app");
 
+const DAILY_RELOAD_HOUR = 3;
+const DAILY_RELOAD_MINUTE = 0;
+let dailyReloadScheduled = false;
+
+function scheduleDailyReload(hour = DAILY_RELOAD_HOUR, minute = DAILY_RELOAD_MINUTE) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (dailyReloadScheduled) {
+    return;
+  }
+
+  dailyReloadScheduled = true;
+
+  const scheduleNext = () => {
+    const now = new Date();
+    const next = new Date();
+    next.setHours(hour, minute, 0, 0);
+
+    if (next <= now) {
+      next.setDate(next.getDate() + 1);
+    }
+
+    const delayMs = next.getTime() - now.getTime();
+
+    window.setTimeout(() => {
+      try {
+        window.location.reload(true);
+      } catch {
+        window.location.reload();
+      }
+
+      scheduleNext();
+    }, delayMs);
+  };
+
+  scheduleNext();
+}
+
+if (typeof window !== "undefined") {
+  window.InmoScheduleDailyReload = scheduleDailyReload;
+}
+
 function App({ utils, catalogSource, sanityConfig }) {
   const [catalog, setCatalog] = React.useState(null);
   const lastCatalogSignatureRef = React.useRef("");
@@ -185,6 +229,8 @@ function startApp() {
   if (!rootElement) {
     return;
   }
+
+  scheduleDailyReload();
 
   const utils = window.InmoUtils;
   const catalogSource = window.InmoCatalogSource;
